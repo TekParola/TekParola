@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tekparola-postgres-dev
+    environment:
+      POSTGRES_DB: tekparola
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - tekparola-dev-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: tekparola-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - tekparola-dev-network
+
+  # Adminer for database management
+  adminer:
+    image: adminer:latest
+    container_name: tekparola-adminer-dev
+    ports:
+      - "8080:8080"
+    networks:
+      - tekparola-dev-network
+
+volumes:
+  postgres_dev_data:
+  redis_dev_data:
+
+networks:
+  tekparola-dev-network:
+    driver: bridge

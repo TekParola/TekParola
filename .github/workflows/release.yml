@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Get version from tag
+        id: tag_version
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+      - name: Generate changelog
+        id: changelog
+        uses: requarks/changelog-action@v1
+        with:
+          token: ${{ github.token }}
+          tag: ${{ github.ref_name }}
+      
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## What's Changed
+            ${{ steps.changelog.outputs.changes }}
+            
+            ## Docker Image
+            ```bash
+            docker pull ${{ secrets.DOCKER_USERNAME }}/tekparola-sso:${{ steps.tag_version.outputs.VERSION }}
+            ```
+            
+            ## Installation
+            See [deployment documentation](./docs/deployment.md) for installation instructions.
+          draft: false
+          prerelease: false
+      
+      - name: Build and publish npm package
+        run: |
+          npm ci
+          npm run build
+          npm version ${{ steps.tag_version.outputs.VERSION }} --no-git-tag-version
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

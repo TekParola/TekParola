@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # TekParola Application (using existing external PostgreSQL and Redis)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tekparola-app
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:5432/tekparola
+      REDIS_URL: redis://host.docker.internal:6379
+      JWT_SECRET: A7x$9mK2#nQ8rT3!vB6yE4wS1@zC5hF0
+      JWT_REFRESH_SECRET: P9q&2nM7%kL4xR8!jG3vC1@yT6wE5hS0
+      SESSION_SECRET: Z8m!4bX7&qW2eR5#nT9kL3@vC6yF1hS0
+      SMTP_HOST: smtp.gmail.com
+      SMTP_USER: test@example.com
+      SMTP_PASS: test-password-123
+      FROM_EMAIL: noreply@tekparola.com
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      PORT: 3000
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+

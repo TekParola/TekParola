@@ -1,0 +1,190 @@
+# GitLab CI/CD Pipeline Configuration
+
+stages:
+  - lint
+  - test
+  - security
+  - build
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  NODE_VERSION: "18"
+  POSTGRES_DB: tekparola_test
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  REDIS_URL: redis://redis:6379
+
+# Cache configuration
+.cache_config: &cache_config
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+      - .npm/
+
+# Node.js image configuration
+.node_config: &node_config
+  image: node:${NODE_VERSION}-alpine
+  <<: *cache_config
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+# Lint stage
+lint:
+  stage: lint
+  <<: *node_config
+  script:
+    - npm run lint
+    - npm run typecheck
+  only:
+    - branches
+    - merge_requests
+
+# Test stage
+test:unit:
+  stage: test
+  <<: *node_config
+  script:
+    - npm run test:unit
+  coverage: '/Lines\s*:\s*(\d+\.?\d*)%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+      junit: coverage/junit.xml
+    paths:
+      - coverage/
+  only:
+    - branches
+    - merge_requests
+
+test:integration:
+  stage: test
+  <<: *node_config
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tekparola_test
+  script:
+    - npm run db:migrate:test
+    - npm run test:integration
+  only:
+    - branches
+    - merge_requests
+
+test:e2e:
+  stage: test
+  <<: *node_config
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    DATABASE_URL: postgresql://postgres:postgres@postgres:5432/tekparola_test
+  script:
+    - npm run db:migrate:test
+    - npm run test:e2e
+  only:
+    - branches
+    - merge_requests
+
+# Security stage
+security:dependencies:
+  stage: security
+  <<: *node_config
+  script:
+    - npm audit --production --audit-level=moderate
+  allow_failure: true
+  only:
+    - branches
+    - merge_requests
+
+security:sast:
+  stage: security
+  image:
+    name: returntocorp/semgrep
+  script:
+    - semgrep ci --config=auto
+  only:
+    - branches
+    - merge_requests
+
+security:secrets:
+  stage: security
+  image:
+    name: trufflesecurity/trufflehog:latest
+    entrypoint: [""]
+  script:
+    - trufflehog git file://. --only-verified
+  only:
+    - branches
+    - merge_requests
+
+# Build stage
+build:docker:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "main" ]; then
+        docker tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE:latest
+        docker push $CI_REGISTRY_IMAGE:latest
+      fi
+  only:
+    - main
+    - develop
+    - tags
+
+# Deploy stage
+deploy:staging:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  script:
+    - kubectl config use-context $K8S_CONTEXT_STAGING
+    - kubectl set image deployment/tekparola-sso tekparola-sso=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA -n staging
+    - kubectl rollout status deployment/tekparola-sso -n staging
+  environment:
+    name: staging
+    url: https://staging.tekparola.com
+  only:
+    - develop
+
+deploy:production:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  script:
+    - kubectl config use-context $K8S_CONTEXT_PRODUCTION
+    - kubectl set image deployment/tekparola-sso tekparola-sso=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA -n production
+    - kubectl rollout status deployment/tekparola-sso -n production
+  environment:
+    name: production
+    url: https://sso.tekparola.com
+  when: manual
+  only:
+    - main
+    - tags
+
+# Performance testing
+performance:
+  stage: test
+  image: grafana/k6:latest
+  script:
+    - k6 run tests/performance/load-test.js
+  artifacts:
+    reports:
+      performance: performance-report.json
+  only:
+    - main
+    - develop
+  allow_failure: true
