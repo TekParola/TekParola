@@ -42,7 +42,7 @@
     "@types/csv-parse": "^1.1.12",
     "@types/csv-stringify": "^1.4.3",
     "@types/node-cron": "^3.0.11",
-    "axios": "^1.6.0",
+    "axios": "^1.11.0",
     "bcrypt": "^5.1.1",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.6",
